@@ -1,0 +1,15 @@
+{
+  "name": "guandan-coach",
+  "version": "1.0.0",
+  "private": true,
+  "description": "掼蛋教练 · 教学版：牌力速查 / 牌型判定 / 逢人配实验室 / 拆牌教练",
+  "scripts": {
+    "dev": "node server.cjs",
+    "test": "node tests/engine.test.js && node tests/game.test.js && node tests/ai-memory.test.js && node tests/render.test.js",
+    "test:engine": "node tests/engine.test.js",
+    "test:game": "node tests/game.test.js",
+    "test:memory": "node tests/ai-memory.test.js",
+    "bench:ai": "node tests/ai-strength.js 250 all",
+    "test:render": "node tests/render.test.js"
+  }
+}

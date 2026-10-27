@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f2efe9">
+  <meta name="description" content="从牌型、逢人配和拆牌到完整实战，边打边学的掼蛋教练。">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="掼蛋教练 · 从看不懂到自己能打">
+  <meta property="og:description" content="牌型速查、逢人配实验室、拆牌教练，还有会记牌的 AI 对手陪你实战。">
+  <meta name="format-detection" content="telephone=no">
+  <title>掼蛋教练 · 从看不懂到自己能打</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">掼</div>
+        <div class="brand-text">
+          <h1>掼蛋教练</h1>
+          <p>牌型 · 逢人配 · 拆牌 · 上桌实战</p>
+        </div>
+      </div>
+
+      <nav class="tabs" id="tabs">
+        <button class="tab" data-view="rules"><em>01</em>牌力速查</button>
+        <button class="tab" data-view="quiz"><em>02</em>牌型判定</button>
+        <button class="tab" data-view="lab"><em>03</em>逢人配实验室</button>
+        <button class="tab" data-view="split"><em>04</em>拆牌教练</button>
+        <button class="tab tab-hot is-active" data-view="play"><em>05</em>实战对局</button>
+      </nav>
+
+      <div class="level-box">
+        <span class="level-label">当前级牌</span>
+        <div class="level-options" id="levelOptions"></div>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="view" id="view-rules"></section>
+      <section class="view" id="view-quiz"></section>
+      <section class="view" id="view-lab"></section>
+      <section class="view" id="view-split"></section>
+      <section class="view is-active" id="view-play"></section>
+    </main>
+
+    <footer class="foot">
+      <span>规则口径：主流掼蛋娱乐规则（级牌可参与顺子/连对/钢板；红桃级牌为逢人配；炸弹 4炸 &lt; 5炸 &lt; 同花顺 &lt; 6炸…）</span>
+      <span class="foot-dot">·</span>
+      <span>教学版 M1 + 实战对局</span>
+    </footer>
+  </div>
+
+  <script src="js/engine.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/view-rules.js"></script>
+  <script src="js/view-quiz.js"></script>
+  <script src="js/view-lab.js"></script>
+  <script src="js/view-split.js"></script>
+  <script src="js/view-play.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
