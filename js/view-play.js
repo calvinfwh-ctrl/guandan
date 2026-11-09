@@ -147,7 +147,7 @@
       '<button class="btn" data-act="pass"' + (turn && d.trick.combo ? '' : ' disabled') + '>过</button>' +
       '<button class="btn ghost" data-act="hint"' + (turn ? '' : ' disabled') + '>提示</button>' +
       '<button class="btn ghost" data-act="clear"' + (S.selected.length ? '' : ' disabled') + '>清空</button>' +
-      '<span class="actions-tip">快捷键：Enter 出牌 · 空格 过 · H 提示</span>' +
+      '<span class="actions-tip kb-only">快捷键：Enter 出牌 · 空格 过 · H 提示</span>' +
       '</div>' +
       '</div>';
   }
@@ -205,8 +205,9 @@
     if (mem.bombExpect < 0.25) bombText = '外面基本不会有炸弹了';
     else {
       var top = mem.topBombRanks.map(function (r) { return GD.RANK_TEXT[r]; }).join('、');
-      bombText = '外面可能还有约 <b>' + Math.max(1, Math.round(mem.bombExpect)) + '</b> 个炸弹' +
-        (top ? '（' + top + ' 概率较高）' : '');
+      bombText = '外面估计还有约 <b>' + Math.max(1, Math.round(mem.bombExpect)) + '</b> 个炸弹' +
+        (top ? '（' + top + ' 概率较高）' : '') +
+        '<span class="mem-note">（按未知牌均匀分布近似估计）</span>';
     }
 
     return '<div class="mem-strip">' +
@@ -437,8 +438,16 @@
         if (!view || !view.classList.contains('is-active')) return;
         var tag = ev.target && ev.target.tagName;
         if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'BUTTON') return;
-        if (ev.key === 'Enter') { ev.preventDefault(); doPlay(); }
-        else if (ev.key === ' ') { ev.preventDefault(); doPass(); }
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          var btnPlay = document.getElementById('btn-play');
+          if (btnPlay && !btnPlay.disabled) doPlay();
+        }
+        else if (ev.key === ' ') {
+          ev.preventDefault();
+          var btnPass = document.getElementById('btn-pass');
+          if (btnPass && !btnPass.disabled) doPass();
+        }
         else if (ev.key.toLowerCase() === 'h') { ev.preventDefault(); doHint(); }
       });
     },

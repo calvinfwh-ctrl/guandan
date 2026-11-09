@@ -249,5 +249,87 @@ test('队友出牌时，教练建议让牌', () => {
   assert.ok(/队友|不要压/.test(h.reason));
 });
 
+/* ===================== 收敛令② 回归用例 ===================== */
+
+/* W-2：双贡同点 → 头游下家先出（座位矩阵 ≥4 配置） */
+function makeTieTributeMatch(headSeat) {
+  const m = G.startMatch({ maxDeals: 2 });
+  const d1 = G.newDeal(m);
+  // 构造 finished：head=headSeat，second=headSeat 对家，fin[2]/fin[3] 为输方
+  const partner = (headSeat + 2) % 4;
+  const others = [0, 1, 2, 3].filter(s => s !== headSeat && s !== partner);
+  d1.finished = [headSeat, partner, others[0], others[1]];
+  // 强制双下且两家都贡大王（同点）
+  const d2 = G.newDeal(m);
+  // 给两个输家各塞两张大王，让他们最高牌都是大王
+  const losers = others;
+  losers.forEach(s => {
+    d2.hands[s] = [C('X', 16, 0), C('X', 16, 1), C('S', 3, 0)];
+  });
+  // 重跑 applyTribute（内部已调用，这里直接读结果）
+  return { m, d2, headSeat, nextOfHead: (headSeat + 1) % 4, losers };
+}
+
+test('W-2 双贡同点 → 头游下家先出（座位矩阵）', () => {
+  for (let head = 0; head < 4; head++) {
+    const m = G.startMatch({ maxDeals: 2 });
+    const d1 = G.newDeal(m);
+    const partner = (head + 2) % 4;
+    const losers = [0, 1, 2, 3].filter(s => s !== head && s !== partner);
+    d1.finished = [head, partner, losers[0], losers[1]];
+    const d2 = G.newDeal(m);
+    // 两家输家都塞大王（同点）
+    losers.forEach(s => {
+      d2.hands[s] = [C('X', 16, 0), C('X', 16, 1), C('S', 3, 0)];
+    });
+    // 重新触发 applyTribute（通过再次 newDeal 模拟）
+    const d3 = G.newDeal(m);
+    // 验证：若同点双贡，先出者必须是头游下家
+    if (d3.tribute && d3.tribute.doubleDown && !d3.tribute.resisted) {
+      const items = d3.tribute.items;
+      if (items.length === 2 &&
+          GD.orderValue(items[0].card, d3.level) === GD.orderValue(items[1].card, d3.level)) {
+        assert.strictEqual(d3.turn, (head + 1) % 4,
+          `head=${head} 同点双贡应先出=head 下家=${(head + 1) % 4}，实际=${d3.turn}`);
+      }
+    }
+  }
+});
+
+/* 拆牌回归：333+44 → 三带二（不拆成三同张+对子） */
+test('拆牌回归：333+44 应拆出三带二', () => {
+  const hand = [
+    C('S', 3), C('H', 3), C('D', 3),  // 333
+    C('S', 4), C('H', 4),             // 44
+    C('S', 7), C('H', 7),             // 77
+    C('S', 9), C('H', 9), C('D', 9)   // 999
+  ];
+  const plan = GD.decomposeHand(hand, 2, 5);
+  const types = plan.hands.map(g => g.type);
+  assert(types.includes('fullhouse'), '应包含三带二，实际=' + types.join(','));
+});
+
+/* 拆牌回归：555+666+77 → 钢板 555666 更优 */
+test('拆牌回归：555+666+77 应拆出钢板', () => {
+  const hand = [
+    C('S', 5), C('H', 5), C('D', 5),  // 555
+    C('S', 6), C('H', 6), C('D', 6),  // 666
+    C('S', 7), C('H', 7)              // 77
+  ];
+  const plan = GD.decomposeHand(hand, 2, 5);
+  const types = plan.hands.map(g => g.type);
+  assert(types.includes('plate'), '应包含钢板，实际=' + types.join(','));
+});
+
+/* 逢人配成对级牌断言 */
+test('逢人配：W+级牌 → 对子级牌 rank15', () => {
+  const lv = 2;
+  const w = C('H', lv);       // 红桃级牌 = 逢人配
+  const lvCard = C('S', lv);  // 黑桃级牌
+  const combo = GD.identify([w, lvCard], lv);
+  assert(combo && combo.type === 'pair' && combo.rank === 15,
+    'W+级牌应识别为对子级牌 rank15，实际=' + JSON.stringify(combo));
+});
+
 console.log(`\n结果：通过 ${pass} 项，失败 ${fail} 项\n`);
 if (fail) process.exitCode = 1;

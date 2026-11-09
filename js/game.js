@@ -132,9 +132,23 @@
       return { from: p, card: card };
     });
 
-    if (doubleDown) gifts.sort(function (a, b) {
-      return GD.orderValue(b.card, deal.level) - GD.orderValue(a.card, deal.level);
-    });
+    if (doubleDown) {
+      gifts.sort(function (a, b) {
+        return GD.orderValue(b.card, deal.level) - GD.orderValue(a.card, deal.level);
+      });
+      /* 官方《竞技掼蛋竞赛规则(试行)2023》：双下进贡相同牌点时，
+         「按顺时针方向进贡，对应还牌（贡左还右）……由进贡给头游者首圈领出」。
+         即：同点时头游下家（逆时针方向紧挨头游的下家）为「进贡给头游者」，由其先出。
+         座位为逆时针 0→1→2→3→0，头游下家 = (head+1)%4。
+         把同点且座位为头游下家的 gift 排到首位（保持其他排序不变）。 */
+      if (gifts.length === 2 &&
+          GD.orderValue(gifts[0].card, deal.level) === GD.orderValue(gifts[1].card, deal.level)) {
+        var nextOfHead = (head + 1) % 4;
+        if (gifts[1].from === nextOfHead && gifts[0].from !== nextOfHead) {
+          var tmp = gifts[0]; gifts[0] = gifts[1]; gifts[1] = tmp;
+        }
+      }
+    }
 
     var receivers = doubleDown ? [head, second] : [head];
     var leadPlayer = gifts[0].from;
@@ -812,11 +826,14 @@
     }
 
     if (partnerWinning) {
+      var partnerFinished = isFinished(deal, owner);
       return {
         action: 'pass',
         cards: [],
-        reason: '这一圈最大的是<b>队友</b>（' + ownerName + '）的牌。<b>不要压队友</b> —— 压上去等于抢走队友的牌权，还白耗一手好牌。' +
-          '除非你这一手能直接走完，否则就"过"。',
+        reason: '这一圈最大的是<b>队友</b>（' + ownerName + '）的牌。' +
+          (partnerFinished
+            ? '队友<b>已经走完</b>，这一圈结束牌权会按接风规则传给队友的下家。若你这一手能<b>直接走完</b>，或想抢下牌权自己领出，可以压；否则就"过"。'
+            : '<b>不要压队友</b> —— 压上去等于抢走队友的牌权，还白耗一手好牌。除非你这一手能直接走完，否则就"过"。'),
         alts: altsText(cands, deal)
       };
     }

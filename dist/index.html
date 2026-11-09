@@ -1669,6 +1669,7 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
   .level-options button { width: 32px; height: 36px; flex-basis: 32px; }
   .coach-toggle { min-height: 44px; }
   .coach-toggle input { width: 20px; height: 20px; }
+  .kb-only { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1827,7 +1828,7 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
 
   var TYPE_HINT = {
     single: '任意一张牌，比点数。',
-    pair: '两张点数相同。大小王可以成对（一对小王 / 一对大王）。',
+    pair: '两张点数相同。大小王可以成对（一对小王 / 一对大王）。两张逢人配可当一对级牌（rank=级牌），可压对 A。',
     triple: '三张点数相同，也叫"三不带"。',
     fullhouse: '三同张 + 一对，只比较三张那部分的点数大小。',
     tube: '三对连续的对子，如 334455，共 6 张。',
@@ -2583,9 +2584,23 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
       return { from: p, card: card };
     });
 
-    if (doubleDown) gifts.sort(function (a, b) {
-      return GD.orderValue(b.card, deal.level) - GD.orderValue(a.card, deal.level);
-    });
+    if (doubleDown) {
+      gifts.sort(function (a, b) {
+        return GD.orderValue(b.card, deal.level) - GD.orderValue(a.card, deal.level);
+      });
+      /* 官方《竞技掼蛋竞赛规则(试行)2023》：双下进贡相同牌点时，
+         「按顺时针方向进贡，对应还牌（贡左还右）……由进贡给头游者首圈领出」。
+         即：同点时头游下家（逆时针方向紧挨头游的下家）为「进贡给头游者」，由其先出。
+         座位为逆时针 0→1→2→3→0，头游下家 = (head+1)%4。
+         把同点且座位为头游下家的 gift 排到首位（保持其他排序不变）。 */
+      if (gifts.length === 2 &&
+          GD.orderValue(gifts[0].card, deal.level) === GD.orderValue(gifts[1].card, deal.level)) {
+        var nextOfHead = (head + 1) % 4;
+        if (gifts[1].from === nextOfHead && gifts[0].from !== nextOfHead) {
+          var tmp = gifts[0]; gifts[0] = gifts[1]; gifts[1] = tmp;
+        }
+      }
+    }
 
     var receivers = doubleDown ? [head, second] : [head];
     var leadPlayer = gifts[0].from;
@@ -3263,11 +3278,14 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
     }
 
     if (partnerWinning) {
+      var partnerFinished = isFinished(deal, owner);
       return {
         action: 'pass',
         cards: [],
-        reason: '这一圈最大的是<b>队友</b>（' + ownerName + '）的牌。<b>不要压队友</b> —— 压上去等于抢走队友的牌权，还白耗一手好牌。' +
-          '除非你这一手能直接走完，否则就"过"。',
+        reason: '这一圈最大的是<b>队友</b>（' + ownerName + '）的牌。' +
+          (partnerFinished
+            ? '队友<b>已经走完</b>，这一圈结束牌权会按接风规则传给队友的下家。若你这一手能<b>直接走完</b>，或想抢下牌权自己领出，可以压；否则就"过"。'
+            : '<b>不要压队友</b> —— 压上去等于抢走队友的牌权，还白耗一手好牌。除非你这一手能直接走完，否则就"过"。'),
         alts: altsText(cands, deal)
       };
     }
@@ -3627,10 +3645,11 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
       '<section class="panel">' +
       '<div class="sec-head"><h2>进贡 · 还贡 · 抗贡</h2><p>第二局开始的固定流程，不懂会直接被判违规</p></div>' +
       stepsHTML([
-        ['单下（上局输方只有末游）', '末游把手上最大的牌进贡给头游（<b>红桃级牌除外</b>），头游从手里还一张 <code>≤10</code> 的牌。然后由末游先出牌。'],
-        ['双下（上局输方是末游 + 三游）', '两个输家都要进贡。头游拿点数大的那份，队友拿小的那份，各自还一张 <code>≤10</code> 的牌。'],
+        ['单下（上局输方只有末游）', '末游把手上最大的牌进贡给头游（<b>红桃级牌除外</b>，其他花色级牌可以进贡），头游从手里还一张 <code>≤10</code> 的牌。然后由末游先出牌。'],
+        ['双下（上局输方是末游 + 三游）', '两个输家都要进贡。头游拿点数大的那份，队友拿小的那份，各自还一张 <code>≤10</code> 的牌。<b>若两家进贡点数相同</b>：按顺时针方向进贡，由<b>头游下家</b>先出（对应「进贡给头游者首圈领出」）。'],
         ['抗贡', '该进贡的人手上抓到<b>两张大王</b>，就可以免贡；改由头游先出牌。'],
-        ['还贡的限制', '还的牌必须是 10 或 10 以下，也不能还级牌 —— 进贡是把大牌送出去，还贡是礼节性地还一张小牌。']
+        ['还贡的限制', '还的牌必须是 10 或 10 以下，也不能还级牌 —— 进贡是把大牌送出去，还贡是礼节性地还一张小牌。<b>若全手牌均大于 10，则还最小的牌</b>（官方兜底条款）。'],
+        ['接风（借风）', '某人出完最后一手牌，若其他人都放弃，下一圈由<b>其对家</b>领出；<b>若对家也已走完，则顺延至其下家</b>。']
       ]) +
       '</section>';
   }
@@ -4373,7 +4392,7 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
       '<button class="btn" data-act="pass"' + (turn && d.trick.combo ? '' : ' disabled') + '>过</button>' +
       '<button class="btn ghost" data-act="hint"' + (turn ? '' : ' disabled') + '>提示</button>' +
       '<button class="btn ghost" data-act="clear"' + (S.selected.length ? '' : ' disabled') + '>清空</button>' +
-      '<span class="actions-tip">快捷键：Enter 出牌 · 空格 过 · H 提示</span>' +
+      '<span class="actions-tip kb-only">快捷键：Enter 出牌 · 空格 过 · H 提示</span>' +
       '</div>' +
       '</div>';
   }
@@ -4431,8 +4450,9 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
     if (mem.bombExpect < 0.25) bombText = '外面基本不会有炸弹了';
     else {
       var top = mem.topBombRanks.map(function (r) { return GD.RANK_TEXT[r]; }).join('、');
-      bombText = '外面可能还有约 <b>' + Math.max(1, Math.round(mem.bombExpect)) + '</b> 个炸弹' +
-        (top ? '（' + top + ' 概率较高）' : '');
+      bombText = '外面估计还有约 <b>' + Math.max(1, Math.round(mem.bombExpect)) + '</b> 个炸弹' +
+        (top ? '（' + top + ' 概率较高）' : '') +
+        '<span class="mem-note">（按未知牌均匀分布近似估计）</span>';
     }
 
     return '<div class="mem-strip">' +
@@ -4663,8 +4683,16 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
         if (!view || !view.classList.contains('is-active')) return;
         var tag = ev.target && ev.target.tagName;
         if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'BUTTON') return;
-        if (ev.key === 'Enter') { ev.preventDefault(); doPlay(); }
-        else if (ev.key === ' ') { ev.preventDefault(); doPass(); }
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          var btnPlay = document.getElementById('btn-play');
+          if (btnPlay && !btnPlay.disabled) doPlay();
+        }
+        else if (ev.key === ' ') {
+          ev.preventDefault();
+          var btnPass = document.getElementById('btn-pass');
+          if (btnPass && !btnPass.disabled) doPass();
+        }
         else if (ev.key.toLowerCase() === 'h') { ev.preventDefault(); doHint(); }
       });
     },
