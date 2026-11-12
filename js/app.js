@@ -58,6 +58,18 @@
       if (v) v.render(doc.getElementById('view-' + this.view), level);
     },
 
+    /* 供实战视图单向同步：把顶部"当前级牌"选择器亮到对局实际级数。
+       不触发视图重渲染（避免与 ViewPlay.paint 互相递归）；
+       用户手动点选择器仍走 setLevel，教学页示例随之刷新。 */
+    syncLevel: function (level) {
+      if (!level || level === this.level) return;
+      this.level = level;
+      try { root.localStorage.setItem('gd-level', String(level)); } catch (e) { }
+      UI.$$('#levelOptions button').forEach(function (b) {
+        b.classList.toggle('is-active', parseInt(b.getAttribute('data-level'), 10) === level);
+      });
+    },
+
     setView: function (name) {
       if (!VIEWS[name]) return;
       this.view = name;

@@ -28,23 +28,30 @@
   }
 
   function ladderHTML(level) {
-    var ranks = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+    /* 牌力阶梯按"比大小"的真实牌力排序：2..A（跳过级数本身），
+       级牌单独一级排在 A 与小王之间 —— 修复前级牌被画在自然点数位置（如打5时5画在4和6之间），
+       与下方"级牌在A之后"的文字说明自相矛盾（v2 修复 C：教学准确性）。 */
+    var ranks = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14].filter(function (r) { return r !== level; });
     var cells = ranks.map(function (r) {
-      var isLv = r === level;
       var c = GD.makeCard('S', r, 0);
       return '<div class="rung">' +
         UI.card(c, level, { size: 'sm' }) +
-        '<span>' + GD.RANK_TEXT[r] + (isLv ? '<br><em>级牌</em>' : '') + '</span>' +
+        '<span>' + GD.RANK_TEXT[r] + '</span>' +
         '</div>' +
-        (r < 14 ? '<span class="arrow">›</span>' : '');
+        '<span class="arrow">›</span>';
     }).join('');
+
+    var levelRung = '<div class="rung">' +
+      UI.card(GD.makeCard('S', level, 0), level, { size: 'sm' }) +
+      '<span>' + GD.RANK_TEXT[level] + '<br><em>级牌</em></span>' +
+      '</div>';
 
     var special = '<span class="arrow">›</span>' +
       '<div class="rung">' + UI.card(GD.makeCard('X', 15, 0), level, { size: 'sm' }) + '<span>小王</span></div>' +
       '<span class="arrow">›</span>' +
       '<div class="rung">' + UI.card(GD.makeCard('X', 16, 0), level, { size: 'sm' }) + '<span>大王</span></div>';
 
-    return '<div class="ladder">' + cells + special + '</div>';
+    return '<div class="ladder">' + cells + levelRung + special + '</div>';
   }
 
   function typeCardsHTML(level) {

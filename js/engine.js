@@ -102,6 +102,16 @@
     return arr;
   }
 
+  /* 可复现随机数（mulberry32）：AI 拟人化默认随机源，测试/基准可用种子复现 */
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
   /* 牌力：2..14 为自然点数，级牌 15，小王 16，大王 17 */
   function orderValue(c, level) {
     if (c.s === 'X') return c.r === 16 ? 17 : 16;
@@ -517,7 +527,8 @@
     return picks;
   }
 
-  function buildDecomposition(hand, level) {
+  function buildDecomposition(hand, level, rng) {
+    var R = rng || Math.random;
     var pool = {}, wilds = [], jokers = [];
     for (var r = 2; r <= 14; r++) pool[r] = [];
     hand.forEach(function (c) {
@@ -553,7 +564,7 @@
 
     /* 2) 钢板 / 三连对 / 顺子 —— 顺序随机，多次尝试取最优 */
     var kinds = ['plate', 'tube', 'straight'];
-    shuffle(kinds);
+    shuffle(kinds, R);
     kinds.forEach(function (kind) {
       var seqs = kind === 'plate' ? SEQ_PLATE : kind === 'tube' ? SEQ_TUBE : SEQ_STRAIGHT;
       var mult = kind === 'plate' ? 3 : kind === 'tube' ? 2 : 1;
@@ -564,7 +575,7 @@
           if (picks) cands.push(picks);
         }
         if (!cands.length) break;
-        commit(cands[Math.floor(Math.random() * cands.length)]);
+        commit(cands[Math.floor(R() * cands.length)]);
       }
     });
 
@@ -622,12 +633,12 @@
     return d.count * 100 + d.singles * 15 - d.bombs * 40;
   }
 
-  /** 27 张手牌的参考拆法（启发式，多次随机取较优） */
-  function decomposeHand(hand, level, attempts) {
+  /** 27 张手牌的参考拆法（启发式，多次随机取较优）。rng 可注入以复现（v2-D） */
+  function decomposeHand(hand, level, attempts, rng) {
     attempts = attempts || 60;
     var best = null, bestScore = Infinity;
     for (var i = 0; i < attempts; i++) {
-      var d = buildDecomposition(hand, level);
+      var d = buildDecomposition(hand, level, rng);
       var s = decompositionScore(d);
       if (s < bestScore) { bestScore = s; best = d; }
     }
@@ -652,6 +663,7 @@
     SEQ_STRAIGHT: SEQ_STRAIGHT, SEQ_TUBE: SEQ_TUBE, SEQ_PLATE: SEQ_PLATE,
 
     makeCard: makeCard, createDeck: createDeck, shuffle: shuffle,
+    rand: mulberry32,
     cardKey: cardKey, isJoker: isJoker, isWild: isWild,
     orderValue: orderValue, rankOrder: rankOrder,
     rankText: rankText, cardText: cardText, cardName: cardName,

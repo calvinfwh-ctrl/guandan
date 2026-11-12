@@ -1545,7 +1545,9 @@ button:focus-visible, [role="button"]:focus-visible, input:focus-visible {
 }
 .my-hand .card { width: 48px; height: 68px; }
 .my-hand .card + .card { margin-left: -9px; }
-.my-hand .card.is-picked { z-index: 2; transform: translateY(-11px); border-color: #ccc0a8; box-shadow: 0 0 0 2px #ccc0a8, 0 10px 18px rgba(0,0,0,.35); }
+.my-hand .card.is-picked { transform: translateY(-11px); border-color: #ccc0a8; box-shadow: 0 0 0 2px #ccc0a8, 0 10px 18px rgba(0,0,0,.35); }
+/* 注意：这里不能加 z-index —— 抬起的牌一旦压到右侧相邻牌的左缘点击区，
+   点击相邻牌会被这张牌截走，表现成"点了 A 却选中/取消了不相干的 B"（v2 修复 A） */
 .my-hand::-webkit-scrollbar { height: 5px; }
 .my-hand::-webkit-scrollbar-thumb { background: #667674; border-radius: 4px; }
 .actions { gap: 8px; margin-top: 11px; }

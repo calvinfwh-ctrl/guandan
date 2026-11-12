@@ -1560,7 +1560,9 @@ button:focus-visible, [role="button"]:focus-visible, input:focus-visible {
 }
 .my-hand .card { width: 48px; height: 68px; }
 .my-hand .card + .card { margin-left: -9px; }
-.my-hand .card.is-picked { z-index: 2; transform: translateY(-11px); border-color: #ccc0a8; box-shadow: 0 0 0 2px #ccc0a8, 0 10px 18px rgba(0,0,0,.35); }
+.my-hand .card.is-picked { transform: translateY(-11px); border-color: #ccc0a8; box-shadow: 0 0 0 2px #ccc0a8, 0 10px 18px rgba(0,0,0,.35); }
+/* 注意：这里不能加 z-index —— 抬起的牌一旦压到右侧相邻牌的左缘点击区，
+   点击相邻牌会被这张牌截走，表现成"点了 A 却选中/取消了不相干的 B"（v2 修复 A） */
 .my-hand::-webkit-scrollbar { height: 5px; }
 .my-hand::-webkit-scrollbar-thumb { background: #667674; border-radius: 4px; }
 .actions { gap: 8px; margin-top: 11px; }
@@ -1882,6 +1884,16 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
       var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
     }
     return arr;
+  }
+
+  /* 可复现随机数（mulberry32）：AI 拟人化默认随机源，测试/基准可用种子复现 */
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
   }
 
   /* 牌力：2..14 为自然点数，级牌 15，小王 16，大王 17 */
@@ -2299,7 +2311,8 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
     return picks;
   }
 
-  function buildDecomposition(hand, level) {
+  function buildDecomposition(hand, level, rng) {
+    var R = rng || Math.random;
     var pool = {}, wilds = [], jokers = [];
     for (var r = 2; r <= 14; r++) pool[r] = [];
     hand.forEach(function (c) {
@@ -2335,7 +2348,7 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
 
     /* 2) 钢板 / 三连对 / 顺子 —— 顺序随机，多次尝试取最优 */
     var kinds = ['plate', 'tube', 'straight'];
-    shuffle(kinds);
+    shuffle(kinds, R);
     kinds.forEach(function (kind) {
       var seqs = kind === 'plate' ? SEQ_PLATE : kind === 'tube' ? SEQ_TUBE : SEQ_STRAIGHT;
       var mult = kind === 'plate' ? 3 : kind === 'tube' ? 2 : 1;
@@ -2346,7 +2359,7 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
           if (picks) cands.push(picks);
         }
         if (!cands.length) break;
-        commit(cands[Math.floor(Math.random() * cands.length)]);
+        commit(cands[Math.floor(R() * cands.length)]);
       }
     });
 
@@ -2404,12 +2417,12 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
     return d.count * 100 + d.singles * 15 - d.bombs * 40;
   }
 
-  /** 27 张手牌的参考拆法（启发式，多次随机取较优） */
-  function decomposeHand(hand, level, attempts) {
+  /** 27 张手牌的参考拆法（启发式，多次随机取较优）。rng 可注入以复现（v2-D） */
+  function decomposeHand(hand, level, attempts, rng) {
     attempts = attempts || 60;
     var best = null, bestScore = Infinity;
     for (var i = 0; i < attempts; i++) {
-      var d = buildDecomposition(hand, level);
+      var d = buildDecomposition(hand, level, rng);
       var s = decompositionScore(d);
       if (s < bestScore) { bestScore = s; best = d; }
     }
@@ -2434,6 +2447,7 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
     SEQ_STRAIGHT: SEQ_STRAIGHT, SEQ_TUBE: SEQ_TUBE, SEQ_PLATE: SEQ_PLATE,
 
     makeCard: makeCard, createDeck: createDeck, shuffle: shuffle,
+    rand: mulberry32,
     cardKey: cardKey, isJoker: isJoker, isWild: isWild,
     orderValue: orderValue, rankOrder: rankOrder,
     rankText: rankText, cardText: cardText, cardName: cardName,
@@ -2486,7 +2500,12 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
       deal: null,
       over: false,
       winnerTeam: null,
-      history: []
+      history: [],
+      /* v2 修复 D（AI 拟人化）：每局一个种子，衍生对局内随机与各座位"牌风"；
+         测试/基准可用 opts.seed 或 opts.rnd 完全复现 */
+      seed: opts.seed != null ? opts.seed : ((Math.random() * 0x7fffffff) | 0),
+      rng: null,
+      styles: null
     };
   }
 
@@ -3042,6 +3061,41 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
     return best === Infinity ? 0 : best;
   }
 
+  /* ------------------------------------------------- 拟人化：随机源与牌风 */
+
+  function matchRng(match) {
+    if (!match.rng) {
+      match.rng = GD.rand(match.seed != null ? match.seed : ((Math.random() * 0x7fffffff) | 0));
+    }
+    return match.rng;
+  }
+
+  /* 每个座位一份稳定"牌风"：tempo=领出换节奏倾向，bombHappy=用炸果断度。
+     steady 模式（教学/基准复现）返回固定中值，不消耗随机数。 */
+  function styleOf(match, idx, rnd, steady) {
+    if (steady) return { tempo: 0.5, bombHappy: 0.5 };
+    if (!match.styles) match.styles = [null, null, null, null];
+    if (!match.styles[idx]) {
+      var R = rnd || Math.random;
+      match.styles[idx] = { tempo: 0.3 + R() * 0.7, bombHappy: 0.25 + R() * 0.5 };
+    }
+    return match.styles[idx];
+  }
+
+  /* 按权重挑一个：items[i] 权重 wfn(i)，累计命中。 */
+  function pickWeighted(items, wfn, rnd) {
+    var R = rnd || Math.random;
+    if (!items || !items.length) return null;
+    var ws = items.map(function (x, i) { return Math.max(1e-6, wfn(i)); });
+    var total = ws.reduce(function (a, b) { return a + b; }, 0);
+    var t = R() * total;
+    for (var i = 0; i < items.length; i++) {
+      t -= ws[i];
+      if (t <= 0) return items[i];
+    }
+    return items[items.length - 1];
+  }
+
   /* ---------------------------------------------------------------- AI 决策 */
 
   function planMap(plan) {
@@ -3080,14 +3134,15 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
 
   var LEAD_PRIORITY = { plate: 0, tube: 0, straight: 0, fullhouse: 1, triple: 2, pair: 3, single: 4, bomb: 9, flush: 9, jokerbomb: 9 };
 
-  function leadChoice(deal, idx, mem) {
+  function leadChoice(deal, idx, mem, opt) {
+    opt = opt || {};
     var hand = deal.hands[idx];
     var level = deal.level;
 
     var whole = GD.identify(hand, level);
     if (whole) return hand.slice(); /* 一把走完 */
 
-    var plan = GD.decomposeHand(hand, level, 20);
+    var plan = GD.decomposeHand(hand, level, 20, opt.rnd);
     var groups = plan.hands.filter(function (h) { return h.type !== 'raw'; });
     if (!groups.length) return hand.slice(0, 1);
 
@@ -3102,9 +3157,9 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
     /* 领出原则：先出整手牌，再出零散牌；同类里先出小的。
        记牌只用来处理一种特殊情况 —— 对手只剩 1 张时，别出一张他能接走的单张。
        （实验结论：按"外面压不住"来领出反而更差，会提前烧掉控制牌，已回退） */
+    function pri(g) { return LEAD_PRIORITY[g.type] == null ? 5 : LEAD_PRIORITY[g.type]; }
     pool.sort(function (a, b) {
-      var pa = LEAD_PRIORITY[a.type] == null ? 5 : LEAD_PRIORITY[a.type];
-      var pb = LEAD_PRIORITY[b.type] == null ? 5 : LEAD_PRIORITY[b.type];
+      var pa = pri(a), pb = pri(b);
       if (pa !== pb) return pa - pb;
       return (a.rank || 0) - (b.rank || 0);
     });
@@ -3117,21 +3172,41 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
         if (safe.length) pool = safe;
       }
     }
+
+    /* v2 修复 D（拟人化领出）：人在领出时不会永远按同一张时刻表走 ——
+       同类整手里带权重轮换（小牌优先为主，偶尔换一首）；新手偶尔跨类乱出。
+       不带 rnd（教练 hint 等教学路径）时保持教科书式 pool[0]，建议可解释。 */
+    if (opt.rnd) {
+      var diff = opt.diff == null ? 1 : opt.diff;
+      var topClass = pool.filter(function (g) { return pri(g) === pri(pool[0]); });
+      var chosen = null;
+      if (topClass.length > 1) {
+        chosen = pickWeighted(topClass, function (i) { return 1 / Math.pow(1 + i, 1.8); }, opt.rnd);
+      } else if (pool.length > 1) {
+        var dipP = diff <= 0 ? 0.5 : (diff === 1 ? 0.18 + 0.14 * (opt.style ? opt.style.tempo : 0.5) : 0.08);
+        if (opt.rnd() < dipP) {
+          var rest = pool.slice(1).filter(function (g) { return !GD.bombFamily(g); });
+          if (rest.length) chosen = pickWeighted(rest, function (i) { return 1 / Math.pow(1 + i, 1.2); }, opt.rnd);
+        }
+      }
+      if (chosen) return chosen.cards.slice();
+    }
     return pool[0].cards.slice();
   }
 
-  function shouldBomb(deal, idx, diff, cur, mem, bombCand) {
+  function shouldBomb(deal, idx, diff, cur, mem, bombCand, style) {
     var played = deal.discarded.length;
     var opp = [0, 1, 2, 3].filter(function (i) {
       return teamOf(i) !== teamOf(idx) && !isFinished(deal, i);
     });
     var minOpp = opp.length ? Math.min.apply(null, opp.map(function (i) { return deal.hands[i].length; })) : 0;
+    var bombHappy = style ? (style.bombHappy || 0.5) : 0.5;
 
     if (minOpp <= 3) return true;                     /* 对手马上要走完，必须拦 */
     if (cur.type === 'bomb' || cur.type === 'jokerbomb') return true; /* 已经是炸弹对轰 */
     if (deal.hands[idx].length <= 6) return true;     /* 自己也快走完，抢牌权冲刺 */
     if (diff <= 0) return false;                      /* 新手不乱炸 */
-    if (played < 45) return false;                    /* 前期炸普通牌型是纯亏 */
+    if (played < 40 + bombHappy * 10) return false;   /* 前期炸普通牌型是纯亏（手痒者窗口略宽，v2-D） */
 
     /* 记牌：外面可能还有更大的炸弹 / 天王炸 → 别急着把炸弹交出去 */
     if (bombCand && mem && threatOf(bombCand, mem, deal.level) > 0.5 && minOpp > 6) {
@@ -3142,8 +3217,9 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
     return diff >= 2 && played > 70;                  /* 高手在残局更敢炸 */
   }
 
-  function followChoice(deal, idx, diff, mem, pol) {
+  function followChoice(deal, idx, diff, mem, pol, rnd, style) {
     pol = pol || {};
+    var R = rnd || Math.random;
     var useThreat = pol.followThreat === true;   /* 默认关闭：实测“挑更强的牌去压”反而更差 */
     var useHoldBack = pol.holdBack !== false;
     var hand = deal.hands[idx];
@@ -3166,7 +3242,7 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
 
     if (partnerWinning) {
       /* 新手偶尔手痒；普通/高手一律让牌 */
-      if (diff <= 0 && Math.random() < 0.25) {
+      if (diff <= 0 && R() < 0.25) {
         var cheap0 = cands.filter(function (c) { return !GD.bombFamily(c); });
         if (cheap0.length) return { action: 'play', cards: cheap0[0].cards.slice() };
       }
@@ -3175,11 +3251,24 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
 
     var nonBomb = cands.filter(function (c) { return !GD.bombFamily(c); });
     if (nonBomb.length) {
-      if (diff <= 0 && Math.random() < 0.15) {
+      if (diff <= 0 && R() < 0.15) {
         return { action: 'play', cards: nonBomb[0].cards.slice() };
       }
-      var plan = GD.decomposeHand(hand, level, 18);
-      var best = scoredCandidates(nonBomb, hand, level, plan, useThreat ? mem : null)[0];
+      var plan = GD.decomposeHand(hand, level, 18, rnd);
+      var ranked = scoredCandidates(nonBomb, hand, level, plan, useThreat ? mem : null);
+      var best = ranked[0];
+
+      /* v2 修复 D（拟人化跟牌）：代价几乎相同的几手里带权重轮换，
+         不再每手固定给"排序第一"的那张（对手闭着眼都能预测）。
+         margin 按难度收紧：新手可能跨结构换手，高手只在同代价里换牌。 */
+      if (rnd && ranked.length > 1) {
+        var margin = diff <= 0 ? 240 : (diff === 1 ? 60 : 26);
+        var nearEq = ranked.filter(function (r) { return r.score <= best.score + margin; });
+        if (nearEq.length > 1) {
+          var wexp = diff <= 0 ? 0.6 : (diff === 1 ? 1.4 : 2.2);
+          best = pickWeighted(nearEq, function (i2) { return 1 / Math.pow(1 + i2, wexp); }, rnd);
+        }
+      }
 
       /* 憋牌：为压一手小牌要拆掉已经成型的牌型（尤其实在动逢人配），
          而对手还早得很 —— 不如过，把结构留住 */
@@ -3191,7 +3280,7 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
       return { action: 'play', cards: best.combo.cards.slice() };
     }
 
-    if (shouldBomb(deal, idx, diff, cur, mem, cands[0])) {
+    if (shouldBomb(deal, idx, diff, cur, mem, cands[0], style)) {
       return { action: 'play', cards: cands[0].cards.slice() };
     }
     return { action: 'pass' };
@@ -3201,11 +3290,15 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
     var deal = match.deal;
     if (deal.phase !== 'play' || deal.turn !== idx) return { action: 'pass' };
     var o = (opts && typeof opts === 'object') ? opts : { legacy: !!opts };
+    /* v2 修复 D：随机源可注入；steady 模式（同种子完全复现）供教学/基准；
+       默认用每局种子派生的对局随机 —— 对手不再每副都走同一条路线 */
+    var rnd = o.rnd || matchRng(match);
+    var style = styleOf(match, idx, o.steady ? null : rnd, o.steady);
     var mem = o.legacy ? null : buildMemory(deal, idx, deal.level);
     if (!deal.trick.combo) {
-      return { action: 'play', cards: leadChoice(deal, idx, o.leadThreat === false ? null : mem) };
+      return { action: 'play', cards: leadChoice(deal, idx, o.leadThreat === false ? null : mem, { diff: diff, rnd: rnd, style: style }) };
     }
-    return followChoice(deal, idx, diff == null ? 1 : diff, mem, o);
+    return followChoice(deal, idx, diff == null ? 1 : diff, mem, o, rnd, style);
   }
 
   /* ---------------------------------------------------------------- 教练提示 */
@@ -3518,23 +3611,30 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
   }
 
   function ladderHTML(level) {
-    var ranks = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+    /* 牌力阶梯按"比大小"的真实牌力排序：2..A（跳过级数本身），
+       级牌单独一级排在 A 与小王之间 —— 修复前级牌被画在自然点数位置（如打5时5画在4和6之间），
+       与下方"级牌在A之后"的文字说明自相矛盾（v2 修复 C：教学准确性）。 */
+    var ranks = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14].filter(function (r) { return r !== level; });
     var cells = ranks.map(function (r) {
-      var isLv = r === level;
       var c = GD.makeCard('S', r, 0);
       return '<div class="rung">' +
         UI.card(c, level, { size: 'sm' }) +
-        '<span>' + GD.RANK_TEXT[r] + (isLv ? '<br><em>级牌</em>' : '') + '</span>' +
+        '<span>' + GD.RANK_TEXT[r] + '</span>' +
         '</div>' +
-        (r < 14 ? '<span class="arrow">›</span>' : '');
+        '<span class="arrow">›</span>';
     }).join('');
+
+    var levelRung = '<div class="rung">' +
+      UI.card(GD.makeCard('S', level, 0), level, { size: 'sm' }) +
+      '<span>' + GD.RANK_TEXT[level] + '<br><em>级牌</em></span>' +
+      '</div>';
 
     var special = '<span class="arrow">›</span>' +
       '<div class="rung">' + UI.card(GD.makeCard('X', 15, 0), level, { size: 'sm' }) + '<span>小王</span></div>' +
       '<span class="arrow">›</span>' +
       '<div class="rung">' + UI.card(GD.makeCard('X', 16, 0), level, { size: 'sm' }) + '<span>大王</span></div>';
 
-    return '<div class="ladder">' + cells + special + '</div>';
+    return '<div class="ladder">' + cells + levelRung + special + '</div>';
   }
 
   function typeCardsHTML(level) {
@@ -4510,6 +4610,23 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
     if (!el || !S.match) return;
     var m = S.match, d = m.deal;
 
+    /* 重绘前记住手牌滚动位置：innerHTML 重建会把它丢掉，
+       丢掉后手牌跳回最左，玩家下一次点击就会命中“不相干的牌”（v2 修复 A） */
+    var prevHand = el.querySelector('.my-hand');
+    var scrollL = prevHand ? prevHand.scrollLeft : 0;
+
+    /* 选牌与手牌失同步时自动清理（换副 / 进贡还贡 / 引擎替换手牌等路径，v2 修复 B 防御） */
+    if (S.selected.length) {
+      var inHand = {};
+      d.hands[0].forEach(function (c) { inHand[GD.cardKey(c)] = 1; });
+      S.selected = S.selected.filter(function (c) { return inHand[GD.cardKey(c)]; });
+    }
+
+    /* 顶部“当前级牌”选择器与实战进度保持一致：升级后全站示例跟着变（v2 修复 B 配套） */
+    if (root.App && typeof root.App.syncLevel === 'function' && d.phase === 'play') {
+      root.App.syncLevel(d.level);
+    }
+
     if (d.phase === 'play') ensureHint();
 
     var body;
@@ -4525,6 +4642,17 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
     }
 
     el.innerHTML = '<section class="panel play-panel">' + headerHTML() + body + '</section>';
+
+    /* 恢复手牌滚动位置（同步一次 + 下一帧兜底一次，防个别浏览器布局时序） */
+    var handEl = el.querySelector('.my-hand');
+    if (handEl && scrollL > 0) {
+      handEl.scrollLeft = scrollL;
+      requestAnimationFrame(function () {
+        if (S.el && S.el.querySelector('.my-hand')) {
+          S.el.querySelector('.my-hand').scrollLeft = scrollL;
+        }
+      });
+    }
   }
 
   /* ------------------------------------------------------------ AI 自动走 */
@@ -4539,6 +4667,16 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
 
     var gen = ++S.gen;
     var seat = d.turn;
+    /* 拟人化出牌节奏（v2 修复 D）：被迫过牌反应快，场面复杂 / 要不要炸想得久一点 */
+    var thinkBase = 420 + Math.random() * 380;
+    if (d.trick.combo) {
+      var nBeats = G.beats(d.hands[seat], d.level, d.trick.combo).length;
+      if (nBeats === 0) thinkBase = 260 + Math.random() * 220;          /* 只能过：很快 */
+      else if (GD.bombFamily(d.trick.combo)) thinkBase += 420 + Math.random() * 480; /* 面对炸弹：纠结 */
+      else if (nBeats > 6) thinkBase += 220 + Math.random() * 300;      /* 选择很多：掂量 */
+    } else {
+      thinkBase += 180 + Math.random() * 260;                          /* 领出：盘算一下 */
+    }
     S.timer = setTimeout(function () {
       if (S.gen !== gen) return;
       var mm = S.match;
@@ -4556,7 +4694,7 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
       S.hint = null;
       paint();
       if (mm.deal.phase === 'play' && mm.deal.turn !== 0) scheduleAI();
-    }, 460 + Math.random() * 420);
+    }, thinkBase);
   }
 
   /* ---------------------------------------------------------------- 操作 */
@@ -4574,7 +4712,10 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
 
   function toggleCard(key) {
     var d = S.match.deal;
-    if (d.phase !== 'play' || d.turn !== 0) return;
+    /* 只要本副还在进行就可以预选牌：轮到别人时提前勾选是自然习惯，
+       升级/进贡后新一副常由别家先出，此时点牌无反应会被当成“坏了”（v2 修复 B）。
+       出牌按钮仍严格受回合限制（handHTML 的 myTurn 条件）。 */
+    if (d.phase !== 'play') return;
     var card = null;
     for (var i = 0; i < d.hands[0].length; i++) {
       if (GD.cardKey(d.hands[0][i]) === key) { card = d.hands[0][i]; break; }
@@ -4769,6 +4910,18 @@ button, .card.clickable { touch-action: manipulation; -webkit-tap-highlight-colo
       });
       var v = VIEWS[this.view];
       if (v) v.render(doc.getElementById('view-' + this.view), level);
+    },
+
+    /* 供实战视图单向同步：把顶部"当前级牌"选择器亮到对局实际级数。
+       不触发视图重渲染（避免与 ViewPlay.paint 互相递归）；
+       用户手动点选择器仍走 setLevel，教学页示例随之刷新。 */
+    syncLevel: function (level) {
+      if (!level || level === this.level) return;
+      this.level = level;
+      try { root.localStorage.setItem('gd-level', String(level)); } catch (e) { }
+      UI.$('#levelOptions button').forEach(function (b) {
+        b.classList.toggle('is-active', parseInt(b.getAttribute('data-level'), 10) === level);
+      });
     },
 
     setView: function (name) {

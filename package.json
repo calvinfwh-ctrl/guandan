@@ -7,10 +7,13 @@
     "dev": "node server.cjs",
     "build": "node tools/build-single.cjs",
     "test:bundle": "node tests/bundle.test.js",
-    "test": "node tests/engine.test.js && node tests/game.test.js && node tests/ai-memory.test.js && node tests/render.test.js && node tests/bundle.test.js",
+    "test": "node tests/engine.test.js && node tests/game.test.js && node tests/ai-memory.test.js && node tests/level-combos.test.js && node tests/ai-human.test.js && node tests/render.test.js && node tests/interaction.test.js && node tests/bundle.test.js",
     "test:engine": "node tests/engine.test.js",
     "test:game": "node tests/game.test.js",
     "test:memory": "node tests/ai-memory.test.js",
+    "test:level": "node tests/level-combos.test.js",
+    "test:human": "node tests/ai-human.test.js",
+    "test:interaction": "node tests/interaction.test.js",
     "bench:ai": "node tests/ai-strength.js 250 all",
     "test:render": "node tests/render.test.js"
   }

@@ -304,7 +304,8 @@ test('拆牌回归：333+44 应拆出三带二', () => {
     C('S', 7), C('H', 7),             // 77
     C('S', 9), C('H', 9), C('D', 9)   // 999
   ];
-  const plan = GD.decomposeHand(hand, 2, 5);
+  /* v2：注入种子随机，修掉历史抖动（原 5 次随机尝试约 3/30 概率漏掉三带二） */
+  const plan = GD.decomposeHand(hand, 2, 60, GD.rand(7));
   const types = plan.hands.map(g => g.type);
   assert(types.includes('fullhouse'), '应包含三带二，实际=' + types.join(','));
 });
@@ -316,7 +317,8 @@ test('拆牌回归：555+666+77 应拆出钢板', () => {
     C('S', 6), C('H', 6), C('D', 6),  // 666
     C('S', 7), C('H', 7)              // 77
   ];
-  const plan = GD.decomposeHand(hand, 2, 5);
+  /* v2：同上，种子随机 + 60 次尝试（原用例在原始代码上即有 ~10% 抖动失败率） */
+  const plan = GD.decomposeHand(hand, 2, 60, GD.rand(42));
   const types = plan.hands.map(g => g.type);
   assert(types.includes('plate'), '应包含钢板，实际=' + types.join(','));
 });

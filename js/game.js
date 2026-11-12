@@ -34,7 +34,12 @@
       deal: null,
       over: false,
       winnerTeam: null,
-      history: []
+      history: [],
+      /* v2 修复 D（AI 拟人化）：每局一个种子，衍生对局内随机与各座位"牌风"；
+         测试/基准可用 opts.seed 或 opts.rnd 完全复现 */
+      seed: opts.seed != null ? opts.seed : ((Math.random() * 0x7fffffff) | 0),
+      rng: null,
+      styles: null
     };
   }
 
@@ -590,6 +595,41 @@
     return best === Infinity ? 0 : best;
   }
 
+  /* ------------------------------------------------- 拟人化：随机源与牌风 */
+
+  function matchRng(match) {
+    if (!match.rng) {
+      match.rng = GD.rand(match.seed != null ? match.seed : ((Math.random() * 0x7fffffff) | 0));
+    }
+    return match.rng;
+  }
+
+  /* 每个座位一份稳定"牌风"：tempo=领出换节奏倾向，bombHappy=用炸果断度。
+     steady 模式（教学/基准复现）返回固定中值，不消耗随机数。 */
+  function styleOf(match, idx, rnd, steady) {
+    if (steady) return { tempo: 0.5, bombHappy: 0.5 };
+    if (!match.styles) match.styles = [null, null, null, null];
+    if (!match.styles[idx]) {
+      var R = rnd || Math.random;
+      match.styles[idx] = { tempo: 0.3 + R() * 0.7, bombHappy: 0.25 + R() * 0.5 };
+    }
+    return match.styles[idx];
+  }
+
+  /* 按权重挑一个：items[i] 权重 wfn(i)，累计命中。 */
+  function pickWeighted(items, wfn, rnd) {
+    var R = rnd || Math.random;
+    if (!items || !items.length) return null;
+    var ws = items.map(function (x, i) { return Math.max(1e-6, wfn(i)); });
+    var total = ws.reduce(function (a, b) { return a + b; }, 0);
+    var t = R() * total;
+    for (var i = 0; i < items.length; i++) {
+      t -= ws[i];
+      if (t <= 0) return items[i];
+    }
+    return items[items.length - 1];
+  }
+
   /* ---------------------------------------------------------------- AI 决策 */
 
   function planMap(plan) {
@@ -628,14 +668,15 @@
 
   var LEAD_PRIORITY = { plate: 0, tube: 0, straight: 0, fullhouse: 1, triple: 2, pair: 3, single: 4, bomb: 9, flush: 9, jokerbomb: 9 };
 
-  function leadChoice(deal, idx, mem) {
+  function leadChoice(deal, idx, mem, opt) {
+    opt = opt || {};
     var hand = deal.hands[idx];
     var level = deal.level;
 
     var whole = GD.identify(hand, level);
     if (whole) return hand.slice(); /* 一把走完 */
 
-    var plan = GD.decomposeHand(hand, level, 20);
+    var plan = GD.decomposeHand(hand, level, 20, opt.rnd);
     var groups = plan.hands.filter(function (h) { return h.type !== 'raw'; });
     if (!groups.length) return hand.slice(0, 1);
 
@@ -650,9 +691,9 @@
     /* 领出原则：先出整手牌，再出零散牌；同类里先出小的。
        记牌只用来处理一种特殊情况 —— 对手只剩 1 张时，别出一张他能接走的单张。
        （实验结论：按"外面压不住"来领出反而更差，会提前烧掉控制牌，已回退） */
+    function pri(g) { return LEAD_PRIORITY[g.type] == null ? 5 : LEAD_PRIORITY[g.type]; }
     pool.sort(function (a, b) {
-      var pa = LEAD_PRIORITY[a.type] == null ? 5 : LEAD_PRIORITY[a.type];
-      var pb = LEAD_PRIORITY[b.type] == null ? 5 : LEAD_PRIORITY[b.type];
+      var pa = pri(a), pb = pri(b);
       if (pa !== pb) return pa - pb;
       return (a.rank || 0) - (b.rank || 0);
     });
@@ -665,21 +706,41 @@
         if (safe.length) pool = safe;
       }
     }
+
+    /* v2 修复 D（拟人化领出）：人在领出时不会永远按同一张时刻表走 ——
+       同类整手里带权重轮换（小牌优先为主，偶尔换一首）；新手偶尔跨类乱出。
+       不带 rnd（教练 hint 等教学路径）时保持教科书式 pool[0]，建议可解释。 */
+    if (opt.rnd) {
+      var diff = opt.diff == null ? 1 : opt.diff;
+      var topClass = pool.filter(function (g) { return pri(g) === pri(pool[0]); });
+      var chosen = null;
+      if (topClass.length > 1) {
+        chosen = pickWeighted(topClass, function (i) { return 1 / Math.pow(1 + i, 1.8); }, opt.rnd);
+      } else if (pool.length > 1) {
+        var dipP = diff <= 0 ? 0.5 : (diff === 1 ? 0.18 + 0.14 * (opt.style ? opt.style.tempo : 0.5) : 0.08);
+        if (opt.rnd() < dipP) {
+          var rest = pool.slice(1).filter(function (g) { return !GD.bombFamily(g); });
+          if (rest.length) chosen = pickWeighted(rest, function (i) { return 1 / Math.pow(1 + i, 1.2); }, opt.rnd);
+        }
+      }
+      if (chosen) return chosen.cards.slice();
+    }
     return pool[0].cards.slice();
   }
 
-  function shouldBomb(deal, idx, diff, cur, mem, bombCand) {
+  function shouldBomb(deal, idx, diff, cur, mem, bombCand, style) {
     var played = deal.discarded.length;
     var opp = [0, 1, 2, 3].filter(function (i) {
       return teamOf(i) !== teamOf(idx) && !isFinished(deal, i);
     });
     var minOpp = opp.length ? Math.min.apply(null, opp.map(function (i) { return deal.hands[i].length; })) : 0;
+    var bombHappy = style ? (style.bombHappy || 0.5) : 0.5;
 
     if (minOpp <= 3) return true;                     /* 对手马上要走完，必须拦 */
     if (cur.type === 'bomb' || cur.type === 'jokerbomb') return true; /* 已经是炸弹对轰 */
     if (deal.hands[idx].length <= 6) return true;     /* 自己也快走完，抢牌权冲刺 */
     if (diff <= 0) return false;                      /* 新手不乱炸 */
-    if (played < 45) return false;                    /* 前期炸普通牌型是纯亏 */
+    if (played < 40 + bombHappy * 10) return false;   /* 前期炸普通牌型是纯亏（手痒者窗口略宽，v2-D） */
 
     /* 记牌：外面可能还有更大的炸弹 / 天王炸 → 别急着把炸弹交出去 */
     if (bombCand && mem && threatOf(bombCand, mem, deal.level) > 0.5 && minOpp > 6) {
@@ -690,8 +751,9 @@
     return diff >= 2 && played > 70;                  /* 高手在残局更敢炸 */
   }
 
-  function followChoice(deal, idx, diff, mem, pol) {
+  function followChoice(deal, idx, diff, mem, pol, rnd, style) {
     pol = pol || {};
+    var R = rnd || Math.random;
     var useThreat = pol.followThreat === true;   /* 默认关闭：实测“挑更强的牌去压”反而更差 */
     var useHoldBack = pol.holdBack !== false;
     var hand = deal.hands[idx];
@@ -714,7 +776,7 @@
 
     if (partnerWinning) {
       /* 新手偶尔手痒；普通/高手一律让牌 */
-      if (diff <= 0 && Math.random() < 0.25) {
+      if (diff <= 0 && R() < 0.25) {
         var cheap0 = cands.filter(function (c) { return !GD.bombFamily(c); });
         if (cheap0.length) return { action: 'play', cards: cheap0[0].cards.slice() };
       }
@@ -723,11 +785,24 @@
 
     var nonBomb = cands.filter(function (c) { return !GD.bombFamily(c); });
     if (nonBomb.length) {
-      if (diff <= 0 && Math.random() < 0.15) {
+      if (diff <= 0 && R() < 0.15) {
         return { action: 'play', cards: nonBomb[0].cards.slice() };
       }
-      var plan = GD.decomposeHand(hand, level, 18);
-      var best = scoredCandidates(nonBomb, hand, level, plan, useThreat ? mem : null)[0];
+      var plan = GD.decomposeHand(hand, level, 18, rnd);
+      var ranked = scoredCandidates(nonBomb, hand, level, plan, useThreat ? mem : null);
+      var best = ranked[0];
+
+      /* v2 修复 D（拟人化跟牌）：代价几乎相同的几手里带权重轮换，
+         不再每手固定给"排序第一"的那张（对手闭着眼都能预测）。
+         margin 按难度收紧：新手可能跨结构换手，高手只在同代价里换牌。 */
+      if (rnd && ranked.length > 1) {
+        var margin = diff <= 0 ? 240 : (diff === 1 ? 60 : 26);
+        var nearEq = ranked.filter(function (r) { return r.score <= best.score + margin; });
+        if (nearEq.length > 1) {
+          var wexp = diff <= 0 ? 0.6 : (diff === 1 ? 1.4 : 2.2);
+          best = pickWeighted(nearEq, function (i2) { return 1 / Math.pow(1 + i2, wexp); }, rnd);
+        }
+      }
 
       /* 憋牌：为压一手小牌要拆掉已经成型的牌型（尤其实在动逢人配），
          而对手还早得很 —— 不如过，把结构留住 */
@@ -739,7 +814,7 @@
       return { action: 'play', cards: best.combo.cards.slice() };
     }
 
-    if (shouldBomb(deal, idx, diff, cur, mem, cands[0])) {
+    if (shouldBomb(deal, idx, diff, cur, mem, cands[0], style)) {
       return { action: 'play', cards: cands[0].cards.slice() };
     }
     return { action: 'pass' };
@@ -749,11 +824,15 @@
     var deal = match.deal;
     if (deal.phase !== 'play' || deal.turn !== idx) return { action: 'pass' };
     var o = (opts && typeof opts === 'object') ? opts : { legacy: !!opts };
+    /* v2 修复 D：随机源可注入；steady 模式（同种子完全复现）供教学/基准；
+       默认用每局种子派生的对局随机 —— 对手不再每副都走同一条路线 */
+    var rnd = o.rnd || matchRng(match);
+    var style = styleOf(match, idx, o.steady ? null : rnd, o.steady);
     var mem = o.legacy ? null : buildMemory(deal, idx, deal.level);
     if (!deal.trick.combo) {
-      return { action: 'play', cards: leadChoice(deal, idx, o.leadThreat === false ? null : mem) };
+      return { action: 'play', cards: leadChoice(deal, idx, o.leadThreat === false ? null : mem, { diff: diff, rnd: rnd, style: style }) };
     }
-    return followChoice(deal, idx, diff == null ? 1 : diff, mem, o);
+    return followChoice(deal, idx, diff == null ? 1 : diff, mem, o, rnd, style);
   }
 
   /* ---------------------------------------------------------------- 教练提示 */

@@ -265,6 +265,23 @@
     if (!el || !S.match) return;
     var m = S.match, d = m.deal;
 
+    /* 重绘前记住手牌滚动位置：innerHTML 重建会把它丢掉，
+       丢掉后手牌跳回最左，玩家下一次点击就会命中“不相干的牌”（v2 修复 A） */
+    var prevHand = el.querySelector('.my-hand');
+    var scrollL = prevHand ? prevHand.scrollLeft : 0;
+
+    /* 选牌与手牌失同步时自动清理（换副 / 进贡还贡 / 引擎替换手牌等路径，v2 修复 B 防御） */
+    if (S.selected.length) {
+      var inHand = {};
+      d.hands[0].forEach(function (c) { inHand[GD.cardKey(c)] = 1; });
+      S.selected = S.selected.filter(function (c) { return inHand[GD.cardKey(c)]; });
+    }
+
+    /* 顶部“当前级牌”选择器与实战进度保持一致：升级后全站示例跟着变（v2 修复 B 配套） */
+    if (root.App && typeof root.App.syncLevel === 'function' && d.phase === 'play') {
+      root.App.syncLevel(d.level);
+    }
+
     if (d.phase === 'play') ensureHint();
 
     var body;
@@ -280,6 +297,17 @@
     }
 
     el.innerHTML = '<section class="panel play-panel">' + headerHTML() + body + '</section>';
+
+    /* 恢复手牌滚动位置（同步一次 + 下一帧兜底一次，防个别浏览器布局时序） */
+    var handEl = el.querySelector('.my-hand');
+    if (handEl && scrollL > 0) {
+      handEl.scrollLeft = scrollL;
+      requestAnimationFrame(function () {
+        if (S.el && S.el.querySelector('.my-hand')) {
+          S.el.querySelector('.my-hand').scrollLeft = scrollL;
+        }
+      });
+    }
   }
 
   /* ------------------------------------------------------------ AI 自动走 */
@@ -294,6 +322,16 @@
 
     var gen = ++S.gen;
     var seat = d.turn;
+    /* 拟人化出牌节奏（v2 修复 D）：被迫过牌反应快，场面复杂 / 要不要炸想得久一点 */
+    var thinkBase = 420 + Math.random() * 380;
+    if (d.trick.combo) {
+      var nBeats = G.beats(d.hands[seat], d.level, d.trick.combo).length;
+      if (nBeats === 0) thinkBase = 260 + Math.random() * 220;          /* 只能过：很快 */
+      else if (GD.bombFamily(d.trick.combo)) thinkBase += 420 + Math.random() * 480; /* 面对炸弹：纠结 */
+      else if (nBeats > 6) thinkBase += 220 + Math.random() * 300;      /* 选择很多：掂量 */
+    } else {
+      thinkBase += 180 + Math.random() * 260;                          /* 领出：盘算一下 */
+    }
     S.timer = setTimeout(function () {
       if (S.gen !== gen) return;
       var mm = S.match;
@@ -311,7 +349,7 @@
       S.hint = null;
       paint();
       if (mm.deal.phase === 'play' && mm.deal.turn !== 0) scheduleAI();
-    }, 460 + Math.random() * 420);
+    }, thinkBase);
   }
 
   /* ---------------------------------------------------------------- 操作 */
@@ -329,7 +367,10 @@
 
   function toggleCard(key) {
     var d = S.match.deal;
-    if (d.phase !== 'play' || d.turn !== 0) return;
+    /* 只要本副还在进行就可以预选牌：轮到别人时提前勾选是自然习惯，
+       升级/进贡后新一副常由别家先出，此时点牌无反应会被当成“坏了”（v2 修复 B）。
+       出牌按钮仍严格受回合限制（handHTML 的 myTurn 条件）。 */
+    if (d.phase !== 'play') return;
     var card = null;
     for (var i = 0; i < d.hands[0].length; i++) {
       if (GD.cardKey(d.hands[0][i]) === key) { card = d.hands[0][i]; break; }
